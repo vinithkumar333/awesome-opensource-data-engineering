@@ -1,0 +1,35 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, trim, lower, to_date, when
+
+# Initialize SparkSession
+spark = SparkSession.builder \
+    .appName("UserActivityETL") \
+    .config("spark.sql.shuffle.partitions", "200") \
+    .getOrCreate()
+
+# Read raw CSV file
+raw_df = spark.read.option("header", True).csv("gs://your-bucket/user_activity.csv")
+
+# Sample Schema: user_id, name, email, country, signup_date, activity_timestamp
+
+# Clean and transform data
+clean_df = raw_df.withColumn("name", trim(col("name"))) \
+    .withColumn("email", lower(trim(col("email")))) \
+    .withColumn("country", trim(col("country"))) \
+    .withColumn("signup_date", to_date(col("signup_date"), "yyyy-MM-dd")) \
+    .withColumn("activity_timestamp", to_date(col("activity_timestamp"), "yyyy-MM-dd HH:mm:ss")) \
+    .withColumn("country", when(col("country").isNull(), "Unknown").otherwise(col("country")))
+
+# Filter out bad records (e.g., missing user_id or activity)
+valid_df = clean_df.filter(col("user_id").isNotNull() & col("activity_timestamp").isNotNull())
+
+# Write cleaned data to Parquet partitioned by country
+valid_df.write \
+    .partitionBy("country") \
+    .mode("overwrite") \
+    .parquet("gs://your-bucket/cleaned_user_activity/")
+
+print("✅ ETL Pipeline completed successfully!")
+
+# Stop SparkSession
+spark.stop()
